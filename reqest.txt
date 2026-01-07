@@ -1,0 +1,442 @@
+제목: (완성 패키지) Windows 상시 ON 데스크탑에서 OpenCode 에이전트 자동 실행 (/oc → PR 생성 + 리포트 코멘트) 설치/운영 가이드 + opencode.yml 전체
+
+0. 목표(구성)
+
+
+
+스마트폰(GitHub 앱)에서 이슈를 만들고 코멘트에 “/oc …”를 남기면
+
+집 Windows 데스크탑이 GitHub Actions “Self-hosted runner”로 작업을 실행하고
+
+자동으로 브랜치를 만들고 변경사항을 커밋한 뒤 PR을 생성하며
+
+이슈에 PR 링크 + 요약 리포트(opencode_report.md) 프리뷰를 코멘트로 남기는 구성
+
+
+핵심 구성요소 A. GitHub Repository B. 집 Windows 데스크탑 = GitHub Actions Self-hosted Runner(서비스로 상시 실행) C. 워크플로우 파일: .github/workflows/opencode.yml (아래에 전체 제공) D. 모델 API 키: GitHub Actions Secrets(OPENAI_API_KEY 또는 ANTHROPIC_API_KEY 등)
+
+
+---
+
+1. 사전 준비(집 Windows 데스크탑) 필수 설치
+
+
+
+Git for Windows
+
+Node.js (권장: 최신 LTS)
+
+Python (권장: 3.11)
+
+
+권장(프로젝트에 따라)
+
+Visual Studio Build Tools(Windows에서 네이티브 패키지 빌드가 필요한 경우)
+
+기타 프로젝트 의존 도구
+
+
+설치 확인(Windows PowerShell)
+
+git --version
+node -v
+npm -v
+python --version
+
+
+---
+
+2. 집 Windows 데스크탑에 GitHub Self-hosted Runner 설치(중요) 2-1. GitHub에서 Runner 등록 화면 열기
+
+
+
+GitHub 레포 → Settings → Actions → Runners → “New self-hosted runner”
+
+OS: Windows 선택
+
+Architecture: x64 선택
+
+
+2-2. GitHub가 보여주는 설치 명령을 집 PC PowerShell에서 그대로 실행 권장 폴더 예시
+
+mkdir C:\actions-runner
+cd C:\actions-runner
+
+GitHub 화면에 “다운로드/압축해제/설정(config)/실행(run)” 순서의 명령이 표시됩니다. 그대로 따라 실행하면 runner가 등록됩니다.
+
+2-3. Runner 라벨(Label) 추가(집 PC만 콕 집어 실행시키기)
+
+러너 등록 과정에서 라벨을 추가하거나, 등록 후 GitHub 러너 화면에서 라벨을 추가합니다.
+
+라벨 예: home-desktop
+
+
+2-4. Runner를 Windows 서비스로 설치/실행(상시 ON 운영 핵심) Runner 폴더(C:\actions-runner)에서:
+
+.\svc install
+.\svc start
+
+성공하면
+
+GitHub Runners 화면에서 해당 runner가 “Online/Idle”로 보입니다.
+
+PC 재부팅 후에도 runner 서비스가 자동 실행됩니다.
+
+
+
+---
+
+3. 모델 API 키 설정(GitHub Actions Secrets) OpenCode가 코딩 작업을 하려면 모델 API 키가 필요합니다.
+
+
+
+3-1. Secrets 등록 경로
+
+GitHub 레포 → Settings → Secrets and variables → Actions → New repository secret
+
+
+3-2. Secret 이름(아래 중 하나만 사용해도 됨)
+
+OPENAI_API_KEY (OpenAI 모델 사용 시) 또는
+
+ANTHROPIC_API_KEY (Claude 모델 사용 시) 또는
+
+GEMINI_API_KEY (Gemini 모델 사용 시)
+
+
+3-3. 워크플로우 파일에서 해당 env 라인 주석 해제
+
+아래 제공되는 opencode.yml에서, 사용하는 키 한 줄만 주석을 풀어 활성화합니다.
+
+
+
+---
+
+4. 워크플로우 파일 추가(필수) 4-1. 레포에 아래 경로로 파일 생성
+
+
+
+.github/workflows/opencode.yml
+
+
+4-2. 동작 개요
+
+트리거: 이슈 코멘트(issue_comment)가 생성될 때
+
+실행 조건:
+
+코멘트에 “/oc”가 포함되어야 실행
+
+PR 코멘트가 아닌 “Issue 코멘트”일 때만 실행(이슈 → PR 생성 흐름)
+
+권한 있는 사람(OWNER/MEMBER/COLLABORATOR)만 실행(보안)
+
+
+Python 프로젝트용:
+
+.venv 생성
+
+pyproject.toml / requirements.txt / setup.py 중 존재하는 방식으로 설치
+
+pytest 실행 및 로그 저장(pytest_output.txt)
+
+리포트 생성(opencode_report.md)
+
+변경 커밋 → PR 생성 → 이슈에 PR 링크 + 리포트 프리뷰 코멘트
+
+
+
+
+---
+
+5. (완성본) Windows + Python용 opencode.yml 전체 아래 내용을 그대로 복사해 .github/workflows/opencode.yml로 저장하세요.
+
+
+
+name: OpenCode Agent (Windows self-hosted, Python)
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: opencode-issue-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  opencode_from_issue_comment:
+    if: >
+      contains(github.event.comment.body, '/oc') &&
+      github.event.issue.pull_request == null &&
+      (github.event.comment.author_association == 'OWNER' ||
+       github.event.comment.author_association == 'MEMBER' ||
+       github.event.comment.author_association == 'COLLABORATOR')
+
+    runs-on: [self-hosted, windows, x64, home-desktop]
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout default branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Setup Node (for OpenCode)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Ensure OpenCode installed
+        shell: pwsh
+        run: |
+          if (-not (Get-Command opencode -ErrorAction SilentlyContinue)) {
+            npm i -g opencode-ai
+          }
+          opencode --version
+
+      - name: Configure git identity
+        shell: pwsh
+        run: |
+          git config user.name "opencode-bot"
+          git config user.email "opencode-bot@users.noreply.github.com"
+
+      - name: Create work branch
+        id: branch
+        shell: pwsh
+        run: |
+          $branch = "oc/issue-${{ github.event.issue.number }}-${{ github.run_id }}"
+          git checkout -b $branch
+          "branch=$branch" >> $env:GITHUB_OUTPUT
+
+      - name: Prepare Python env (venv + deps)
+        shell: pwsh
+        run: |
+          python -m venv .venv
+          .\.venv\Scripts\python -m pip install --upgrade pip
+
+          if (Test-Path "pyproject.toml") {
+            .\.venv\Scripts\python -m pip install -e .
+          } elseif (Test-Path "requirements.txt") {
+            .\.venv\Scripts\python -m pip install -r requirements.txt
+          } elseif (Test-Path "setup.py") {
+            .\.venv\Scripts\python -m pip install -e .
+          } else {
+            Write-Host "No pyproject/requirements/setup found. Skipping dependency install."
+          }
+
+          .\.venv\Scripts\python -m pip install pytest
+
+      - name: Run agent task
+        id: agent
+        shell: pwsh
+        env:
+          # === 모델 키: 하나만 설정 (사용하는 것만 주석 해제) ===
+          # OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          # ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+          REPO: ${{ github.repository }}
+        run: |
+          $instruction = $env:COMMENT_BODY -replace '(?s)^.*?/oc\s*', ''
+          $instruction = $instruction.Trim()
+          if ([string]::IsNullOrWhiteSpace($instruction)) {
+            $instruction = "이 이슈를 해결해줘. 변경사항을 커밋하고 테스트까지 실행한 뒤 요약 리포트를 만들어줘."
+          }
+
+          $prompt = @"
+당신은 저장소($env:REPO)의 파이썬 코딩 에이전트입니다. 아래 이슈를 해결하세요.
+
+[Issue #$env:ISSUE_NUMBER] $env:ISSUE_TITLE
+--- Issue Body ---
+$env:ISSUE_BODY
+------------------
+
+[User instruction]
+$instruction
+
+필수 요구사항:
+1) 최소 변경으로 해결(불필요한 리포맷/대량 수정 금지).
+2) 테스트는 Windows에서 venv(.venv)로 실행합니다.
+   - python: .venv\Scripts\python
+   - pytest: .venv\Scripts\python -m pytest -q
+3) 테스트를 실행하고 결과를 파일로 저장하세요:
+   - pytest_output.txt (stdout/stderr 포함)
+4) 작업 리포트 파일 생성:
+   - opencode_report.md
+   - 포함 항목: 요약 / 변경 파일 / 실행한 명령 / 테스트 결과 요약 / 남은 리스크
+5) 마지막에 git diff 기준 변경사항이 존재해야 합니다.
+"@
+
+          opencode run "$prompt"
+
+          if (Test-Path ".\.venv\Scripts\python.exe") {
+            try {
+              .\.venv\Scripts\python -m pytest -q *>&1 | Tee-Object -FilePath "pytest_output.txt"
+            } catch {
+              "pytest failed. See log above." | Out-File -Append -Encoding UTF8 "pytest_output.txt"
+            }
+          } else {
+            "venv not found; pytest skipped." | Out-File -Encoding UTF8 "pytest_output.txt"
+          }
+
+          if (-not (Test-Path "opencode_report.md")) {
+            @"
+# OpenCode Report (fallback)
+
+- Issue: #$env:ISSUE_NUMBER $env:ISSUE_TITLE
+- Instruction: $instruction
+
+(에이전트가 opencode_report.md 생성을 누락했습니다. Actions 로그와 pytest_output.txt를 확인하세요.)
+"@ | Out-File -Encoding UTF8 "opencode_report.md"
+          }
+
+          $tail = ""
+          if (Test-Path "pytest_output.txt") {
+            $tail = (Get-Content "pytest_output.txt" -Tail 80) -join "`n"
+          }
+          Add-Content -Encoding UTF8 "opencode_report.md" "`n---`n## Pytest log (tail)`n```text`n$tail`n```"
+
+      - name: Commit changes (if any)
+        id: commit
+        shell: pwsh
+        run: |
+          git add -A
+          $status = git status --porcelain
+          if ([string]::IsNullOrWhiteSpace($status)) {
+            echo "no_changes=true" >> $env:GITHUB_OUTPUT
+            exit 0
+          }
+          git commit -m "OpenCode: resolve issue #${{ github.event.issue.number }}"
+          echo "no_changes=false" >> $env:GITHUB_OUTPUT
+
+      - name: Create Pull Request
+        if: steps.commit.outputs.no_changes == 'false'
+        id: cpr
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: ${{ steps.branch.outputs.branch }}
+          title: "OpenCode: Issue #${{ github.event.issue.number }} - ${{ github.event.issue.title }}"
+          body: |
+            Closes #${{ github.event.issue.number }}
+
+            ## OpenCode summary
+            - Full report: `opencode_report.md`
+            - Test log: `pytest_output.txt`
+          labels: |
+            opencode
+            automated-pr
+
+      - name: Comment back to Issue with PR + summary
+        if: steps.commit.outputs.no_changes == 'false'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync('opencode_report.md', 'utf8');
+            const preview = report.length > 3500 ? report.slice(0, 3500) + "\n\n...(truncated)" : report;
+            const prUrl = `${{ steps.cpr.outputs.pull-request-url }}`;
+
+            const body =
+`✅ OpenCode 작업 완료: PR 생성됨
+
+- PR: ${prUrl}
+
+--- 요약 리포트 미리보기 ---
+\`\`\`
+${preview}
+\`\`\`
+`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.issue.number,
+              body
+            });
+
+      - name: Comment back to Issue (no changes)
+        if: steps.commit.outputs.no_changes == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.issue.number,
+              body: "⚠️ OpenCode가 실행됐지만 커밋할 변경사항이 없었습니다. 지시가 너무 추상적이거나 이미 반영된 상태일 수 있어요. Actions 로그/pytest_output.txt/opencode_report.md를 확인해 주세요."
+            });
+
+
+---
+
+6. 스마트폰에서 운영 방법(사용 예시) 6-1. 이슈 생성
+
+
+
+GitHub 앱에서 이슈를 만들고, 본문에 재현 방법/완료 조건을 가능하면 적습니다.
+
+
+6-2. “/oc” 코멘트로 실행 이슈 코멘트에 아래처럼 남기면 자동 실행됩니다.
+
+예시(권장 포맷)
+
+/oc
+재현 방법:
+- .venv\Scripts\python -m pytest -q
+
+목표:
+- failing 테스트 수정
+- 변경 최소화
+
+완료 조건:
+- pytest 전체 통과
+- opencode_report.md에 변경 요약/테스트 결과 기록
+
+6-3. 결과 확인
+
+Actions 실행 로그 확인 가능
+
+PR 생성됨(변경사항 커밋 포함)
+
+이슈에 PR 링크 + 리포트 프리뷰 코멘트 자동 등록
+
+PR diff 리뷰 후 merge 여부 결정(권장: 자동 merge 금지)
+
+
+
+---
+
+7. 보안/안전 운영 체크리스트(중요)
+
+
+
+Self-hosted runner는 집 PC 권한으로 코드를 실행합니다.
+
+권장:
+
+1. 실행 권한을 OWNER/MEMBER/COLLABORATOR로 제한(워크플로우에 포함됨)
+
+
+2. 공개 레포일 경우: 외부 코멘트 실행 차단(추가 제한 권장)
+
+
+3. PR을 통해서만 반영하고, 최종 merge는 사람이 리뷰 후 수행
+
+
+4. API 키는 GitHub Secrets로만 관리(코드 하드코딩 금지)
+
+
+5. 가능하면 전용 PC/전용 계정으로 운영(중요 데이터와 분리)

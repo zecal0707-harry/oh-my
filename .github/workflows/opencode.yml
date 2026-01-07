@@ -1,0 +1,225 @@
+name: OpenCode Agent (Windows self-hosted, Python)
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: opencode-issue-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  opencode_from_issue_comment:
+    if: >
+      contains(github.event.comment.body, '/oc') &&
+      github.event.issue.pull_request == null &&
+      (github.event.comment.author_association == 'OWNER' ||
+       github.event.comment.author_association == 'MEMBER' ||
+       github.event.comment.author_association == 'COLLABORATOR')
+
+    runs-on: [self-hosted, windows, x64, home-desktop]
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout default branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Setup Node (for OpenCode)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Ensure OpenCode installed
+        shell: pwsh
+        run: |
+          if (-not (Get-Command opencode -ErrorAction SilentlyContinue)) {
+            npm i -g opencode-ai
+          }
+          opencode --version
+
+      - name: Configure git identity
+        shell: pwsh
+        run: |
+          git config user.name "opencode-bot"
+          git config user.email "opencode-bot@users.noreply.github.com"
+
+      - name: Create work branch
+        id: branch
+        shell: pwsh
+        run: |
+          $branch = "oc/issue-${{ github.event.issue.number }}-${{ github.run_id }}"
+          git checkout -b $branch
+          "branch=$branch" >> $env:GITHUB_OUTPUT
+
+      - name: Prepare Python env (venv + deps)
+        shell: pwsh
+        run: |
+          python -m venv .venv
+          .\.venv\Scripts\python -m pip install --upgrade pip
+
+          if (Test-Path "pyproject.toml") {
+            .\.venv\Scripts\python -m pip install -e .
+          } elseif (Test-Path "requirements.txt") {
+            .\.venv\Scripts\python -m pip install -r requirements.txt
+          } elseif (Test-Path "setup.py") {
+            .\.venv\Scripts\python -m pip install -e .
+          } else {
+            Write-Host "No pyproject/requirements/setup found. Skipping dependency install."
+          }
+
+          .\.venv\Scripts\python -m pip install pytest
+
+      - name: Run agent task
+        id: agent
+        shell: pwsh
+        env:
+          # === 모델 키: 하나만 설정 (사용하는 것만 주석 해제) ===
+          # OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          # ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+          REPO: ${{ github.repository }}
+        run: |
+          $instruction = $env:COMMENT_BODY -replace '(?s)^.*?/oc\s*', ''
+          $instruction = $instruction.Trim()
+          if ([string]::IsNullOrWhiteSpace($instruction)) {
+            $instruction = "이 이슈를 해결해줘. 변경사항을 커밋하고 테스트까지 실행한 뒤 요약 리포트를 만들어줘."
+          }
+
+          $prompt = @"
+당신은 저장소($env:REPO)의 파이썬 코딩 에이전트입니다. 아래 이슈를 해결하세요.
+
+[Issue #$env:ISSUE_NUMBER] $env:ISSUE_TITLE
+--- Issue Body ---
+$env:ISSUE_BODY
+------------------
+
+[User instruction]
+$instruction
+
+필수 요구사항:
+1) 최소 변경으로 해결(불필요한 리포맷/대량 수정 금지).
+2) 테스트는 Windows에서 venv(.venv)로 실행합니다.
+   - python: .venv\Scripts\python
+   - pytest: .venv\Scripts\python -m pytest -q
+3) 테스트를 실행하고 결과를 파일로 저장하세요:
+   - pytest_output.txt (stdout/stderr 포함)
+4) 작업 리포트 파일 생성:
+   - opencode_report.md
+   - 포함 항목: 요약 / 변경 파일 / 실행한 명령 / 테스트 결과 요약 / 남은 리스크
+5) 마지막에 git diff 기준 변경사항이 존재해야 합니다.
+"@
+
+          opencode run "$prompt"
+
+          if (Test-Path ".\.venv\Scripts\python.exe") {
+            try {
+              .\.venv\Scripts\python -m pytest -q *>&1 | Tee-Object -FilePath "pytest_output.txt"
+            } catch {
+              "pytest failed. See log above." | Out-File -Append -Encoding UTF8 "pytest_output.txt"
+            }
+          } else {
+            "venv not found; pytest skipped." | Out-File -Encoding UTF8 "pytest_output.txt"
+          }
+
+          if (-not (Test-Path "opencode_report.md")) {
+            @"
+# OpenCode Report (fallback)
+
+- Issue: #$env:ISSUE_NUMBER $env:ISSUE_TITLE
+- Instruction: $instruction
+
+(에이전트가 opencode_report.md 생성을 누락했습니다. Actions 로그와 pytest_output.txt를 확인하세요.)
+"@ | Out-File -Encoding UTF8 "opencode_report.md"
+          }
+
+          $tail = ""
+          if (Test-Path "pytest_output.txt") {
+            $tail = (Get-Content "pytest_output.txt" -Tail 80) -join "`n"
+          }
+          Add-Content -Encoding UTF8 "opencode_report.md" "`n---`n## Pytest log (tail)`n```text`n$tail`n```"
+
+      - name: Commit changes (if any)
+        id: commit
+        shell: pwsh
+        run: |
+          git add -A
+          $status = git status --porcelain
+          if ([string]::IsNullOrWhiteSpace($status)) {
+            echo "no_changes=true" >> $env:GITHUB_OUTPUT
+            exit 0
+          }
+          git commit -m "OpenCode: resolve issue #${{ github.event.issue.number }}"
+          echo "no_changes=false" >> $env:GITHUB_OUTPUT
+
+      - name: Create Pull Request
+        if: steps.commit.outputs.no_changes == 'false'
+        id: cpr
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: ${{ steps.branch.outputs.branch }}
+          title: "OpenCode: Issue #${{ github.event.issue.number }} - ${{ github.event.issue.title }}"
+          body: |
+            Closes #${{ github.event.issue.number }}
+
+            ## OpenCode summary
+            - Full report: `opencode_report.md`
+            - Test log: `pytest_output.txt`
+          labels: |
+            opencode
+            automated-pr
+
+      - name: Comment back to Issue with PR + summary
+        if: steps.commit.outputs.no_changes == 'false'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync('opencode_report.md', 'utf8');
+            const preview = report.length > 3500 ? report.slice(0, 3500) + "\n\n...(truncated)" : report;
+            const prUrl = `${{ steps.cpr.outputs.pull-request-url }}`;
+
+            const body =
+`✅ OpenCode 작업 완료: PR 생성됨
+
+- PR: ${prUrl}
+
+--- 요약 리포트 미리보기 ---
+\`\`\`
+${preview}
+\`\`\`
+`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.issue.number,
+              body
+            });
+
+      - name: Comment back to Issue (no changes)
+        if: steps.commit.outputs.no_changes == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.issue.number,
+              body: "⚠️ OpenCode가 실행됐지만 커밋할 변경사항이 없었습니다. 지시가 너무 추상적이거나 이미 반영된 상태일 수 있어요. Actions 로그/pytest_output.txt/opencode_report.md를 확인해 주세요."
+            });
