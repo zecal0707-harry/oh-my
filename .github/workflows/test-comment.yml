@@ -1,0 +1,24 @@
+name: Test Comment Trigger
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  test:
+    if: contains(github.event.comment.body, '/test')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Echo test
+        run: echo "Comment trigger works!"
+
+      - name: Comment back
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.issue.number,
+              body: '✅ Test comment trigger is working!'
+            });
