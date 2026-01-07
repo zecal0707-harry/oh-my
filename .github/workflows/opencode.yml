@@ -22,7 +22,7 @@ jobs:
        github.event.comment.author_association == 'MEMBER' ||
        github.event.comment.author_association == 'COLLABORATOR')
 
-    runs-on: [self-hosted, windows, x64, home-desktop]
+    runs-on: [self-hosted, Windows, X64, home-desktop]
     timeout-minutes: 45
 
     steps:
