@@ -42,7 +42,7 @@ jobs:
           node-version: "20"
 
       - name: Ensure OpenCode installed
-        shell: pwsh
+        shell: powershell
         run: |
           if (-not (Get-Command opencode -ErrorAction SilentlyContinue)) {
             npm i -g opencode-ai
@@ -50,21 +50,21 @@ jobs:
           opencode --version
 
       - name: Configure git identity
-        shell: pwsh
+        shell: powershell
         run: |
           git config user.name "opencode-bot"
           git config user.email "opencode-bot@users.noreply.github.com"
 
       - name: Create work branch
         id: branch
-        shell: pwsh
+        shell: powershell
         run: |
           $branch = "oc/issue-${{ github.event.issue.number }}-${{ github.run_id }}"
           git checkout -b $branch
           "branch=$branch" >> $env:GITHUB_OUTPUT
 
       - name: Prepare Python env (venv + deps)
-        shell: pwsh
+        shell: powershell
         run: |
           python -m venv .venv
           .\.venv\Scripts\python -m pip install --upgrade pip
@@ -83,7 +83,7 @@ jobs:
 
       - name: Run agent task
         id: agent
-        shell: pwsh
+        shell: powershell
         env:
           # === 모델 키: 하나만 설정 (사용하는 것만 주석 해제) ===
           # OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -157,7 +157,7 @@ $instruction
 
       - name: Commit changes (if any)
         id: commit
-        shell: pwsh
+        shell: powershell
         run: |
           git add -A
           $status = git status --porcelain
