@@ -16,7 +16,7 @@ jobs:
 
     steps:
       - name: Echo test
-        shell: pwsh
+        shell: powershell
         run: |
           Write-Host "OpenCode workflow is working!"
           Write-Host "Comment body: ${{ github.event.comment.body }}"
