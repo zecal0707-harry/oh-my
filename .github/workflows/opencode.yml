@@ -151,7 +151,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $prUrl = gh pr create --title "OpenCode: Issue #${{ github.event.issue.number }} - ${{ github.event.issue.title }}" --body "Closes #${{ github.event.issue.number }}`n`n## OpenCode summary`n- Full report: opencode_report.md`n- Test log: pytest_output.txt" --label "opencode" --label "automated-pr" --base main 2>&1
+          $prUrl = gh pr create --title "OpenCode: Issue #${{ github.event.issue.number }} - ${{ github.event.issue.title }}" --body "Closes #${{ github.event.issue.number }}`n`n## OpenCode summary`n- Full report: opencode_report.md`n- Test log: pytest_output.txt" --base main 2>&1
           echo "pr_url=$prUrl" >> $env:GITHUB_OUTPUT
 
       - name: Comment back to Issue with PR + summary
