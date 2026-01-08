@@ -128,9 +128,11 @@ jobs:
           $appendText = $nl + "====" + $nl + "## Pytest log (tail)" + $nl + "``````text" + $nl + $tail + $nl + "``````"
           Add-Content -Encoding UTF8 "opencode_report.md" $appendText
 
-      - name: Commit changes (if any)
+      - name: Commit and push changes (if any)
         id: commit
         shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           git add -A
           $status = git status --porcelain
@@ -139,24 +141,18 @@ jobs:
             exit 0
           }
           git commit -m "OpenCode: resolve issue #${{ github.event.issue.number }}"
+          git push -u origin ${{ steps.branch.outputs.branch }}
           echo "no_changes=false" >> $env:GITHUB_OUTPUT
 
       - name: Create Pull Request
         if: steps.commit.outputs.no_changes == 'false'
         id: cpr
-        uses: peter-evans/create-pull-request@v6
-        with:
-          branch: ${{ steps.branch.outputs.branch }}
-          title: "OpenCode: Issue #${{ github.event.issue.number }} - ${{ github.event.issue.title }}"
-          body: |
-            Closes #${{ github.event.issue.number }}
-
-            ## OpenCode summary
-            - Full report: `opencode_report.md`
-            - Test log: `pytest_output.txt`
-          labels: |
-            opencode
-            automated-pr
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $prUrl = gh pr create --title "OpenCode: Issue #${{ github.event.issue.number }} - ${{ github.event.issue.title }}" --body "Closes #${{ github.event.issue.number }}`n`n## OpenCode summary`n- Full report: opencode_report.md`n- Test log: pytest_output.txt" --label "opencode" --label "automated-pr" --base main 2>&1
+          echo "pr_url=$prUrl" >> $env:GITHUB_OUTPUT
 
       - name: Comment back to Issue with PR + summary
         if: steps.commit.outputs.no_changes == 'false'
@@ -166,7 +162,7 @@ jobs:
             const fs = require('fs');
             const report = fs.readFileSync('opencode_report.md', 'utf8');
             const preview = report.length > 3500 ? report.slice(0, 3500) + "\n\n...(truncated)" : report;
-            const prUrl = `${{ steps.cpr.outputs.pull-request-url }}`;
+            const prUrl = `${{ steps.cpr.outputs.pr_url }}`;
             const body = `OpenCode completed: PR created\n\n- PR: ${prUrl}\n\n=== Report Preview ===\n\`\`\`\n${preview}\n\`\`\``;
             await github.rest.issues.createComment({
               owner: context.repo.owner,
