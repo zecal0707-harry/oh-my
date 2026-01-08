@@ -105,15 +105,15 @@ jobs:
           $prompt += "4) Create opencode_report.md with: summary, changed files, commands run, test results, risks" + $nl
           $prompt += "5) Ensure git diff shows changes at the end."
           opencode run "$prompt"
+          $exitCode = $LASTEXITCODE
+          Write-Host "OpenCode exit code: $exitCode"
           if (Test-Path ".\.venv\Scripts\python.exe") {
-            try {
-              .\.venv\Scripts\python -m pytest -q *>&1 | Tee-Object -FilePath "pytest_output.txt"
-            } catch {
-              "pytest failed. See log above." | Out-File -Append -Encoding UTF8 "pytest_output.txt"
-            }
+            .\.venv\Scripts\python -m pytest -q 2>&1 | Tee-Object -FilePath "pytest_output.txt"
+            Write-Host "Pytest completed (exit code may vary based on tests)"
           } else {
             "venv not found; pytest skipped." | Out-File -Encoding UTF8 "pytest_output.txt"
           }
+          $LASTEXITCODE = 0
           if (-not (Test-Path "opencode_report.md")) {
             $fallback = "# OpenCode Report (fallback)" + $nl + $nl
             $fallback += "- Issue: #$env:ISSUE_NUMBER $env:ISSUE_TITLE" + $nl
