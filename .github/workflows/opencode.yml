@@ -101,9 +101,9 @@ jobs:
 당신은 저장소($env:REPO)의 파이썬 코딩 에이전트입니다. 아래 이슈를 해결하세요.
 
 [Issue #$env:ISSUE_NUMBER] $env:ISSUE_TITLE
---- Issue Body ---
+=== Issue Body ===
 $env:ISSUE_BODY
-------------------
+==================
 
 [User instruction]
 $instruction
@@ -148,7 +148,7 @@ $instruction
           if (Test-Path "pytest_output.txt") {
             $tail = (Get-Content "pytest_output.txt" -Tail 80) -join "`n"
           }
-          Add-Content -Encoding UTF8 "opencode_report.md" "`n---`n## Pytest log (tail)`n```text`n$tail`n```"
+          Add-Content -Encoding UTF8 "opencode_report.md" "`n====`n## Pytest log (tail)`n``````text`n$tail`n``````"
 
       - name: Commit changes (if any)
         id: commit
@@ -195,7 +195,7 @@ $instruction
 
 - PR: ${prUrl}
 
---- 요약 리포트 미리보기 ---
+=== 요약 리포트 미리보기 ===
 \`\`\`
 ${preview}
 \`\`\`
